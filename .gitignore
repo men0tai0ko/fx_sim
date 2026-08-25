@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ---- 生成物・実行時データ ----
+# いずれもコードから再生成できるもの。追跡すると差分がノイズだらけになる。
+
+# 価格データのキャッシュ（python data.py で取り直せる）
+cache/
+
+# バックテスト結果・図
+results/
+
+# 秘密情報。誤って作業フォルダに置いても絶対にコミットしない
+token.txt
+*.token
+.env
+secrets/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
