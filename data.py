@@ -98,7 +98,44 @@ def load_panel(symbols: list[str] | None = None,
         panel[field.lower()] = pd.DataFrame(
             {s: frames[s][field].reindex(index) for s in symbols}, index=index
         )
+
+    # 直近に抜けがあるなら、配信側が後から埋めている可能性がある。
+    # キャッシュの寿命（12時間）を待たずに1度だけ取り直す。
+    if not force and find_gaps(panel, days=7) and _gap_retry_due():
+        _mark_gap_retry()
+        return load_panel(symbols, start, end, force=True)
     return panel
+
+
+_GAP_RETRY_FILE = os.path.join(CACHE_DIR, ".gap_retry")
+GAP_RETRY_INTERVAL = timedelta(hours=1)   # 取り直しはこの間隔より頻繁にしない
+
+
+def _gap_retry_due() -> bool:
+    if not os.path.exists(_GAP_RETRY_FILE):
+        return True
+    age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(_GAP_RETRY_FILE))
+    return age > GAP_RETRY_INTERVAL
+
+
+def _mark_gap_retry() -> None:
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    with open(_GAP_RETRY_FILE, "w", encoding="utf-8") as f:
+        f.write(datetime.now().isoformat())
+
+
+def last_gap_retry() -> str | None:
+    """
+    直近の「欠損を検知して取り直した」時刻（無ければ None）。
+    ダッシュボード側で「自動で取り直しは試みたが、それでも埋まっていない」
+    ことを示すために使う。GitHub Actions は毎回まっさらな環境で走るため
+    （cache/はGit管理外）、この情報はローカルの常駐実行でのみ意味を持つ。
+    """
+    try:
+        with open(_GAP_RETRY_FILE, encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
 
 
 def find_gaps(panel: dict, days: int = 30) -> list[str]:
@@ -117,6 +154,33 @@ def find_gaps(panel: dict, days: int = 30) -> list[str]:
     expected = pd.date_range(start, idx[-1], freq="D")
     expected = expected[expected.weekday < 5]     # 土(5)・日(6)を除外
     return [str(d.date()) for d in expected.difference(idx)]
+
+
+def fetch_live(symbols: list[str] | None = None) -> dict[str, float]:
+    """
+    現在値（直近5分足の終値）を一括取得する。1リクエストで全銘柄ぶん。
+    取れなかった銘柄はキーごと落とす（呼び出し側で「売買不可」として扱う）。
+
+    FXは土日休場のため、週末はここが空の dict を返すことがある
+    （呼び出し側の live_trade.py はそれを「取得できませんでした」として
+    次ループへ回すだけで、特別な曜日判定は不要）。
+    """
+    symbols = symbols or list(SYMBOLS)
+    df = yf.download(" ".join(symbols), period="1d", interval="5m",
+                     progress=False, auto_adjust=False)
+    if df is None or df.empty:
+        return {}
+    close = df["Close"]
+    out = {}
+    for s in symbols:
+        try:
+            ser = close[s] if isinstance(close, pd.DataFrame) else close
+            ser = ser.dropna()
+            if len(ser):
+                out[s] = float(ser.iloc[-1])
+        except (KeyError, IndexError):
+            continue
+    return out
 
 
 def main() -> None:

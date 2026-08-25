@@ -1,0 +1,1599 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FX仮想運用ダッシュボード</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb;
+    --page: #f9f9f7;
+    --ink: #0b0b0b;
+    --ink2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --series: #2a78d6;
+    --series-dim: #86b6ef;
+    --series-soft: rgba(42,120,214,0.13);
+    --good: #0ca30c;
+    --bad: #d03b3b;
+    --warn: #fab219;
+    /* 見た目の奥行き用。データの色ではないので配色検証の対象外 */
+    --shadow: 0 1px 2px rgba(11,11,11,.04), 0 10px 30px -14px rgba(11,11,11,.16);
+    --glass: rgba(255,255,255,.72);
+    --glass-border: rgba(11,11,11,.09);
+    --edge: rgba(11,11,11,.16);
+    --badge-bg: rgba(255,255,255,.5);
+    --pill-bg: rgba(255,255,255,.55);
+    --row-hover: rgba(42,120,214,.045);
+    /* 背景のオーロラ。3色を淡く重ねて平坦な単色から抜け出させる */
+    --aurora-1: rgba(42,120,214,.16);
+    --aurora-2: rgba(232,123,164,.11);
+    --aurora-3: rgba(27,175,122,.10);
+    /* ヒーロー数値のグラデーション。両端とも背景に対し7:1以上を確保した色 */
+    --ink-grad: #1c5cab;
+    /* 選択中ボタン。青ランプの濃い段に白文字で 7.5:1 を確保する
+       （明るい青に白文字だと12pxの文字には足りない） */
+    --btn-on-bg: #1c5cab;
+    --btn-on-fg: #ffffff;
+    /* 銘柄の色。カテゴリ配色の1〜4番を順番どおりに使う。
+       隣り合わせの検証済みの並びなので、積み上げバーで区別がつく。 */
+    --sym-1: #2a78d6;   /* BTC */
+    --sym-2: #eb6834;   /* ETH */
+    --sym-3: #1baf7a;   /* XRP */
+    --sym-4: #eda100;   /* SOL */
+    --cash: #c3c2b7;    /* 現金は無彩色にして銘柄と混同させない */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface: #1a1a19;
+      --page: #0d0d0d;
+      --ink: #ffffff;
+      --ink2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255,255,255,0.10);
+      --series: #3987e5;
+      --series-dim: #184f95;
+      --series-soft: rgba(57,135,229,0.16);
+      --good: #0ca30c;
+      --bad: #d03b3b;
+      --shadow: 0 1px 2px rgba(0,0,0,.5), 0 16px 40px -18px rgba(0,0,0,.9);
+      --glass: rgba(38,38,40,.55);
+      --glass-border: rgba(255,255,255,.09);
+      --edge: rgba(255,255,255,.22);
+      --badge-bg: rgba(255,255,255,.05);
+      --pill-bg: rgba(255,255,255,.05);
+      --row-hover: rgba(57,135,229,.09);
+      --aurora-1: rgba(57,135,229,.22);
+      --aurora-2: rgba(213,81,129,.14);
+      --aurora-3: rgba(25,158,112,.13);
+      --ink-grad: #9ec5f4;
+      /* 暗い面では明るい青に暗い文字を載せる方がコントラストが取れる */
+      --btn-on-bg: #3987e5;
+      --btn-on-fg: #0b0b0b;
+      --sym-1: #3987e5;
+      --sym-2: #d95926;
+      --sym-3: #199e70;
+      --sym-4: #c98500;
+      --cash: #52514e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 30px 20px 44px;
+    background: var(--page); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", "Yu Gothic UI", sans-serif;
+    font-size: 14px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  /* 背景のオーロラ。固定して、スクロールしても光の位置が動かないようにする */
+  body::before {
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(58% 42% at 12% -4%, var(--aurora-1), transparent 68%),
+      radial-gradient(48% 38% at 88% 4%, var(--aurora-2), transparent 68%),
+      radial-gradient(72% 46% at 50% 104%, var(--aurora-3), transparent 68%);
+  }
+  .wrap { max-width: 1140px; margin: 0 auto; }
+
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  h1 {
+    font-size: 17px; margin: 0; font-weight: 700; letter-spacing: .01em;
+    display: flex; align-items: center; gap: 9px;
+  }
+  /* タイトル脇のアクセント。ページの色の起点になる */
+  h1::before {
+    content: ""; width: 4px; height: 19px; border-radius: 2px; flex: none;
+    background: linear-gradient(180deg, var(--series), var(--series-dim));
+  }
+  /* 小さい文字には --muted (#898781) を使わない。
+     これはグラフの軸ラベル用の色で、明るい面では3.5:1しか出ず本文には足りない。 */
+  .sub { color: var(--ink2); font-size: 12px; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 3px 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    border: 1px solid var(--state); background: var(--badge-bg);
+    letter-spacing: .02em; color: var(--ink);
+  }
+  /* 状態は色（点と枠）で示し、文字は読める色に保つ。
+     状態色そのものを文字にすると明るい面で3.1:1まで落ちる。 */
+  .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--state); flex: none; }
+  .badge { box-shadow: 0 0 20px -6px var(--state); }
+  .badge.on { --state: var(--good); }
+  .badge.on .dot { animation: pulse 2.4s ease-in-out infinite; }
+  .badge.off { --state: var(--bad); }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 var(--state); opacity: 1; }
+    70%      { box-shadow: 0 0 0 5px transparent; opacity: .55; }
+  }
+  /* 動きを抑える設定なら、脈動も幅のアニメーションも止める */
+  @media (prefers-reduced-motion: reduce) {
+    .badge.on .dot { animation: none; }
+    .hbar .fill, .cbar .seg, .card, button, tbody tr { transition: none !important; }
+  }
+
+  /* ガラス質のカード。背景のオーロラを透かして奥行きを出す */
+  .card {
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid var(--glass-border);
+    border-radius: 18px; padding: 20px 22px; margin-top: 14px;
+    box-shadow: var(--shadow);
+    position: relative;
+  }
+  /* 上辺のハイライト。ガラスの縁の反射に見せる */
+  .card::after {
+    content: ""; position: absolute; left: 18px; right: 18px; top: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--edge), transparent);
+    pointer-events: none;
+  }
+  /* 見出しは小さく、頭に短い線を置いて区切りを作る */
+  h2 {
+    font-size: 11px; color: var(--ink2); margin: 0 0 14px; font-weight: 700;
+    letter-spacing: .09em; text-transform: none;
+    display: flex; align-items: center; gap: 8px;
+  }
+  h2::before {
+    content: ""; width: 12px; height: 2px; border-radius: 1px; flex: none;
+    background: var(--axis);
+  }
+
+  .hero { display: flex; gap: 44px; flex-wrap: wrap; align-items: flex-end; }
+  .hero .label { color: var(--ink2); font-size: 11px; letter-spacing: .06em; font-weight: 600; }
+  .hero .value {
+    /* 桁が増えても狭い画面で溢れないよう可変にする（1,000万円台まで想定） */
+    font-size: clamp(32px, 8.5vw, 54px);
+    font-weight: 750; line-height: 1.02; letter-spacing: -.03em;
+    font-variant-numeric: tabular-nums; margin-top: 2px;
+    /* 画面の主役。グラデーションで視線を集める。
+       両端とも背景に対し7:1以上あり、clip非対応でも色は残る */
+    color: var(--ink);
+    background: linear-gradient(118deg, var(--ink) 30%, var(--ink-grad));
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .hero .delta {
+    font-size: 21px; font-weight: 700; letter-spacing: -.01em;
+    font-variant-numeric: tabular-nums; margin-top: 4px;
+  }
+  .stats {
+    display: flex; gap: 34px; flex-wrap: wrap; margin-top: 20px;
+    padding-top: 16px; border-top: 1px solid var(--grid);
+  }
+  .stat .k { color: var(--ink2); font-size: 11px; letter-spacing: .04em; }
+  .stat .v { font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums;
+             letter-spacing: -.01em; }
+  .good { color: var(--good); }
+  .bad { color: var(--bad); }
+  a { color: var(--series); text-decoration: none; }
+  a:hover, a:focus-visible { text-decoration: underline; }
+
+  /* 相場判断のカードは、いまのレジームの色を左端に帯として出す */
+  #regimecard::before {
+    content: ""; position: absolute; left: 0; top: 16px; bottom: 16px; width: 3px;
+    border-radius: 0 3px 3px 0; background: var(--regime-color, var(--axis));
+    box-shadow: 0 0 18px -1px var(--regime-color, transparent);
+  }
+  .regime { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .regime .arrow { color: var(--muted); }
+  .pill {
+    padding: 4px 14px; border-radius: 999px; font-weight: 700; font-size: 13px;
+    border: 1px solid var(--border); background: var(--pill-bg);
+  }
+  /* レジーム色は枠と点で示し、文字は読みやすい色のままにする。
+     状態色は小さい文字にはコントラストが足りない（暗い面で3.6:1） */
+  #regime {
+    border-color: var(--regime-color, var(--border)); color: var(--ink);
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  #regime::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%; flex: none;
+    background: var(--regime-color, var(--axis));
+  }
+
+  /* overflow:hidden が無いと、ホバー中にリサイズされたとき（スマホの画面回転、
+     デスクトップでのウィンドウドラッグ中など）tip の座標が古いまま残り、
+     ページ全体に横スクロールが出ることがある。hideTip() は opacity しか
+     戻さないので、ここで確実にクリップしておく。 */
+  .chartbox { position: relative; overflow: hidden; }
+  svg { display: block; width: 100%; }
+  .tip {
+    position: absolute; pointer-events: none; opacity: 0; transition: opacity .1s;
+    background: var(--surface); border: 1px solid var(--glass-border); border-radius: 12px;
+    padding: 9px 12px; font-size: 12px; white-space: nowrap;
+    box-shadow: 0 8px 28px -8px rgba(0,0,0,.5); z-index: 5;
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  }
+  .tip .big { font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; }
+
+  .warnbar:not(:empty) {
+    margin-top: 14px; padding: 11px 16px; border-radius: 14px; font-size: 13px;
+    background: var(--glass); color: var(--ink);
+    -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    border: 1px solid var(--warn); border-left-width: 3px;
+    box-shadow: 0 0 26px -12px var(--warn), var(--shadow);
+  }
+
+  /* 期間フィルタ・操作ボタン */
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chart-controls {
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 10px; margin-bottom: 14px;
+  }
+  button {
+    font: inherit; font-size: 12px; padding: 5px 14px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--pill-bg); color: var(--ink2);
+    cursor: pointer; transition: background .15s, border-color .15s, color .15s;
+  }
+  button:hover { border-color: var(--muted); color: var(--ink); }
+  button:focus-visible { outline: 2px solid var(--series); outline-offset: 2px; }
+  button.on {
+    background: var(--btn-on-bg); border-color: var(--btn-on-bg);
+    color: var(--btn-on-fg); font-weight: 700;
+    box-shadow: 0 3px 16px -4px var(--btn-on-bg);
+  }
+  .hbar { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+  .hbar .track { width: 66px; height: 6px; border-radius: 3px; background: var(--grid);
+                 overflow: hidden; flex: none; }
+  /* display:block が要る。span のままだと幅・高さが効かず 0×0 になって帯が見えない */
+  .hbar .fill {
+    display: block; height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, var(--series-dim), var(--series));
+    box-shadow: 0 0 10px -2px var(--series);
+    transition: width .35s ease;
+  }
+  .hbar .fill.reached {
+    background: linear-gradient(90deg, var(--good), var(--good));
+    box-shadow: 0 0 10px -2px var(--good);
+  }
+  /* ストップに近いことは「達成」ではなく「警戒」なので、reachedとは逆の色にする */
+  .hbar .fill.danger {
+    background: linear-gradient(90deg, var(--bad), var(--bad));
+    box-shadow: 0 0 10px -2px var(--bad);
+  }
+  .spark { display: block; }
+  /* 資産の内訳バー。区切りは背景色の隙間で作る（線を引かない） */
+  .cbar {
+    display: flex; gap: 2px; height: 30px; border-radius: 8px; overflow: hidden;
+    background: var(--grid);
+  }
+  .cbar .seg { display: block; height: 100%; transition: width .4s ease; }
+  .cbar .seg:first-child { border-radius: 8px 0 0 8px; }
+  .cbar .seg:last-child { border-radius: 0 8px 8px 0; }
+  /* 表の中で銘柄色を示す小さな四角 */
+  .swi {
+    display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+    margin-right: 8px; vertical-align: baseline; flex: none;
+  }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+  .legend .lg { display: inline-flex; align-items: center; gap: 6px;
+                font-size: 12px; color: var(--ink2); }
+  .legend .sw { width: 14px; height: 8px; border-radius: 2px; display: inline-block; flex: none; }
+  /* 売買履歴が伸び続けてページが果てしなく長くならないようにする */
+  .capped { max-height: 420px; overflow-y: auto; }
+
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 9px 12px; white-space: nowrap; }
+  th {
+    color: var(--ink2); font-size: 11px; font-weight: 700; letter-spacing: .05em;
+    border-bottom: 1px solid var(--axis); padding-bottom: 8px;
+    position: sticky; top: 0; background: var(--surface); z-index: 1;
+  }
+  td { border-bottom: 1px solid var(--grid); }
+  tbody tr { transition: background .12s; }
+  tbody tr:hover { background: var(--row-hover); }
+  tbody tr:last-child td { border-bottom: none; }
+  th:first-child, td:first-child { text-align: left; font-weight: 600; }
+  /* 列の出し分け。狭い画面で横スクロールさせるより、判断に効かない列から順に隠す。
+     残す優先度: 銘柄・現在値・点灯まで・状態 ＞ 推移・前日比・ストップ ＞ 移動平均比・水準
+
+     .c-level / .c-chg は監視ユニバース表と売買履歴表の両方で使い回している
+     （前者は「シグナル水準/前日比」、後者は「約定単価/理由」）。#universe で
+     スコープしないと、ここでの非表示が売買履歴の別の列にも及んでしまう。 */
+  @media (max-width: 1080px) { #universe .c-level { display: none; } }
+  @media (max-width: 900px)  { #universe .c-ma    { display: none; } }
+  @media (max-width: 720px)  { #universe .c-spark { display: none; } }
+  /* ストップ価格は保有ポジション表にも出るので、狭い画面ではこちらを落とす */
+  @media (max-width: 560px)  { #universe .c-chg, #universe .c-stop { display: none; } }
+  /* 保有ポジション表のバーは数値のストップ列と情報が重なるので、狭い画面では先に落とす */
+  @media (max-width: 640px)  { #positions .c-stopgap { display: none; } }
+  /* 売買履歴表は列が少ないので、ユニバース表とは別の閾値で約定単価と理由を落とす */
+  @media (max-width: 720px)  { #trades .c-level, #trades .c-chg { display: none; } }
+  /* 列を削っても表が器に収まらないので、狭い画面では詰める。
+     銘柄コード(USDJPY=X)は名前があれば無くても分かるため落とす。 */
+  @media (max-width: 720px) {
+    th, td { padding: 8px 7px; }
+    .hbar { gap: 6px; }
+    .hbar .track { width: 34px; }
+    #universe td:first-child .sub { display: none; }
+  }
+  /* さらに狭い場合。720pxのブロックより後に置くこと（同じ指定は後勝ち） */
+  @media (max-width: 480px) {
+    th, td { padding: 8px 4px; }
+    .hbar .track { width: 26px; }
+  }
+
+  /* 中身が無いカードが縦に間延びしないよう、余白を詰めて中央に置く */
+  .empty {
+    color: var(--ink2); padding: 4px 0; display: flex; align-items: center; gap: 9px;
+  }
+  .empty::before {
+    content: ""; width: 6px; height: 6px; border-radius: 50%; flex: none;
+    background: var(--axis);
+  }
+  .errline {
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 12px; color: var(--ink2); padding: 5px 0;
+    border-bottom: 1px solid var(--grid); word-break: break-all; white-space: normal;
+  }
+  .errline:last-child { border-bottom: none; }
+  footer { color: var(--ink2); font-size: 11px; margin-top: 22px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>FX仮想運用ダッシュボード</h1>
+    <span id="status" class="badge off"><span class="dot"></span>読み込み中</span>
+    <span class="sub" id="updated"></span>
+    <span class="sub" id="next"></span>
+    <span style="margin-left:auto; display:flex; gap:10px; align-items:center">
+      <span class="sub" id="age"></span>
+      <button id="now" type="button">今すぐ更新</button>
+    </span>
+  </header>
+  <div class="sub">架空の資金によるシミュレーションです。実際の売買・送金は行いません。</div>
+  <div id="stale" class="warnbar"></div>
+
+  <div class="card">
+    <div class="hero">
+      <div>
+        <div class="label">総資産</div>
+        <div class="value" id="equity">—</div>
+      </div>
+      <div>
+        <div class="label">損益（元手 1,000,000円）</div>
+        <div class="delta" id="pnl">—</div>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="k">現金</div><div class="v" id="cash">—</div></div>
+      <div class="stat"><div class="k">評価額</div><div class="v" id="invested">—</div></div>
+      <div class="stat"><div class="k">建玉率</div><div class="v" id="expo">—</div>
+        <div id="exposprk" style="margin-top:3px"></div></div>
+      <div class="stat"><div class="k">ピーク比</div><div class="v" id="dd">—</div></div>
+      <div class="stat"><div class="k">運用開始</div><div class="v" id="started">—</div></div>
+    </div>
+  </div>
+
+  <div class="card" id="regimecard">
+    <h2>いまの相場判断</h2>
+    <div class="regime">
+      <span class="pill" id="regime">—</span>
+      <span class="arrow">→</span>
+      <span class="pill" id="strategy">—</span>
+      <span class="sub" id="cap"></span>
+    </div>
+    <div class="sub" id="reason" style="margin-top:8px"></div>
+    <div id="regimebars" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
+    <h2>監視ユニバース</h2>
+    <div class="scroll"><div id="universe"></div></div>
+    <div class="sub" id="uni-note" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <h2>資産推移</h2>
+    <div class="chart-controls">
+      <div class="filters" id="ranges">
+        <button type="button" data-h="24">24時間</button>
+        <button type="button" data-h="168">7日</button>
+        <button type="button" data-h="720">30日</button>
+        <button type="button" data-h="0" class="on">全期間</button>
+      </div>
+      <!-- 「増減」は記録間隔ごとの差分バー。将来「日次」を第4の選択肢として
+           ここに追加する（サーバ側の集約単位を切り替える形で拡張する想定）。 -->
+      <div class="filters" id="chartmode">
+        <button type="button" data-mode="line" class="on">総資産</button>
+        <button type="button" data-mode="bar">増減</button>
+        <button type="button" data-mode="dd">ドローダウン</button>
+      </div>
+    </div>
+    <div class="chartbox">
+      <svg id="chart" role="img" aria-label="総資産の推移"></svg>
+      <div class="tip" id="tip"></div>
+    </div>
+    <div class="legend" id="rlegend"></div>
+    <div class="sub" style="margin-top:10px;text-align:right">
+      <a id="equitydl" href="#" download hidden>資産推移をCSVでダウンロード</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>期間サマリー</h2>
+    <div id="periodsummary"></div>
+  </div>
+
+  <div class="card">
+    <h2>資産の内訳</h2>
+    <div id="compo"></div>
+    <div class="scroll" style="margin-top:16px"><div id="positions"></div></div>
+  </div>
+
+  <div class="card">
+    <h2>取引成績（決済済みのみ）</h2>
+    <div id="stats"></div>
+  </div>
+
+  <div class="card">
+    <h2>売買履歴（新しい順・最新40件）</h2>
+    <div class="scroll capped"><div id="trades"></div></div>
+    <div class="sub" style="margin-top:10px;text-align:right">
+      <a id="tradesdl" href="#" download hidden>売買履歴をCSVでダウンロード</a>
+    </div>
+  </div>
+
+  <div class="card" id="errcard" hidden>
+    <h2>直近のエラー</h2>
+    <div id="errors"></div>
+    <div id="errfreq"></div>
+    <div class="sub" style="margin-top:8px">
+      通信断などで失敗したときの記録。ループは止まらず再試行しています（全文は results/live_errors.log）。
+    </div>
+  </div>
+
+  <footer id="foot"></footer>
+</div>
+
+<script>
+const yen = v => Math.round(v).toLocaleString("ja-JP") + "円";
+const pct = v => (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
+const cls = v => v > 0 ? "good" : (v < 0 ? "bad" : "");
+let LAST = null;
+
+function setText(id, text, klass) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  if (klass !== undefined) el.className = el.className.replace(/\b(good|bad)\b/g, "").trim() + (klass ? " " + klass : "");
+}
+
+function render(s) {
+  LAST = s;
+  const k = s.snapshot;          // バッジの表示でも使うので最初に取り出す
+  const badge = document.getElementById("status");
+  if (s.mode === "scheduled") {
+    // GitHub Actions などの定期実行。常駐していないので「稼働中」とは意味が違う
+    badge.className = "badge on";
+    badge.innerHTML = '<span class="dot"></span>定期実行';
+    const min = Math.round((s.interval || 3600) / 60);
+    document.getElementById("updated").textContent =
+      `${min}分ごとに実行 / 最終実行 ${k ? k.ts : "—"}`;
+  } else if (s.running) {
+    badge.className = "badge on";
+    badge.innerHTML = '<span class="dot"></span>稼働中';
+    document.getElementById("updated").textContent =
+      `PID ${s.pid} / ${s.interval}秒間隔 / 最終更新 ${s.heartbeat}`;
+  } else {
+    badge.className = "badge off";
+    badge.innerHTML = '<span class="dot"></span>停止中';
+    document.getElementById("updated").textContent =
+      s.stale_reason ? `停止中（${s.stale_reason}）` : "トレーダーが起動していません";
+  }
+
+  if (k) {
+    setText("equity", yen(k.equity));
+    setText("pnl", `${k.pnl >= 0 ? "+" : ""}${Math.round(k.pnl).toLocaleString("ja-JP")}円 （${pct(k.pnl_pct)}）`, cls(k.pnl));
+    setText("cash", yen(k.cash));
+    setText("invested", yen(k.invested));
+    setText("expo", (k.equity ? (k.invested / k.equity * 100) : 0).toFixed(1) + "%");
+    setText("dd", k.drawdown_pct.toFixed(2) + "%", k.drawdown_pct < 0 ? "bad" : "");
+    setText("started", k.started ? k.started.slice(0, 16) : "—");
+    setText("regime", k.regime);
+    setText("strategy", k.strategy);
+    // レジームの色をカードの左帯とピルに反映（グラフ下の帯と同じ対応）
+    document.getElementById("regimecard").style.setProperty(
+      "--regime-color", REGIME_COLOR[k.regime] || "var(--axis)");
+    setText("cap", `エクスポージャー上限 ${k.cap_pct.toFixed(0)}%`);
+    setText("reason", "根拠: " + k.reason);
+    renderExpoSpark(s.curve);
+    renderRegimeBars(k);
+    renderComposition(k);
+    renderPositions(k);
+    renderUniverse(k);
+  } else {
+    // スナップショットが無いのに前回の数値を残すと、動いていないのに
+    // 動いているように見えてしまう。明示的に空にする。
+    ["equity", "pnl", "cash", "invested", "expo", "dd", "started",
+     "regime", "strategy"].forEach(id => setText(id, "—", ""));
+    setText("cap", ""); setText("reason", "");
+    document.getElementById("exposprk").innerHTML = "";
+    document.getElementById("regimebars").innerHTML = "";
+    document.getElementById("compo").innerHTML = "";
+    document.getElementById("periodsummary").innerHTML = "";
+    document.getElementById("positions").innerHTML =
+      '<div class="empty">データ待ち（トレーダーの初回ループがまだ完了していません）</div>';
+    document.getElementById("universe").innerHTML =
+      '<div class="empty">データ待ち</div>';
+    document.getElementById("uni-note").textContent = "";
+    document.getElementById("stale").textContent = "";
+  }
+  renderTrades(s.trades);
+  renderStats(s.stats);
+  renderErrors(s.errors, s.error_freq);
+  drawChart(s.curve, k ? k.capital : 1000000);
+  if (k) renderPeriodSummary(s.curve);
+  updateDownloadLinks(s);
+  setTabIdentity(s);
+  // 静的配信では常駐サーバが無く、実際には「ファイルが作られた時刻」なので言い換える
+  document.getElementById("foot").textContent = s.mode === "scheduled"
+    ? `このページの生成時刻 ${s.server_time} ／ 表示専用で、売買には一切関与しません。`
+      + `内容が変わるのは定期実行のときだけです。`
+    : `サーバ時刻 ${s.server_time} ／ この画面は表示専用で、売買には一切関与しません。15秒ごとに自動更新。`;
+}
+
+// プロセスは生きているのにデータが更新されない、が一番危険な壊れ方。
+// 心拍とスナップショットの時刻がずれたら画面上で警告する。
+// 古さは時間の経過で決まるので、再描画ではなく毎秒のティックから呼ぶ。
+function warnIfStale() {
+  const s = LAST, k = s && s.snapshot;
+  const el = document.getElementById("stale");
+  if (!k) { el.innerHTML = ""; return; }
+  const msgs = [];
+  if (s.running && s.interval && k.ts) {
+    const age = (Date.now() - parseTs(k.ts)) / 1000;
+    if (age > s.interval * 3) {
+      const mins = Math.floor(age / 60);
+      // 案内先は動作環境で違う。常駐ならローカルのログ、定期実行ならActionsの履歴
+      msgs.push(s.mode === "scheduled"
+        ? `⚠ 表示中のデータは ${mins}分前のものです。`
+          + `定期実行が遅れているか失敗している可能性があります`
+          + `（GitHubのActionsタブで実行履歴を確認してください）。`
+        : `⚠ 表示中のデータは ${mins}分前のものです。`
+          + `トレーダーは起動していますが、更新が止まっている可能性があります`
+          + `（results/live_errors.log を確認してください）。`);
+    }
+  }
+  // 日足の抜けは指標の集計期間を静かにずらす。気づけるように表に出す。
+  if (k.data_gaps && k.data_gaps.length) {
+    // 自動取り直し（data.load_panel の1時間おきリトライ）を試みたのに
+    // まだ埋まっていない場合は、その旨を添える。試行自体がまだなら
+    // 「自然に埋まるかもしれない一時的な抜け」の可能性が残っている段階。
+    const retryNote = k.data_gap_retried_at
+      ? `自動での取り直しも試みましたが埋まっていません（最終試行 ${k.data_gap_retried_at.slice(0, 16).replace("T", " ")}）。`
+      : "";
+    msgs.push(`⚠ 日足データが ${k.data_gaps.length}日ぶん欠けています`
+      + `（${k.data_gaps.join("、")}）。配信元の不具合です。${retryNote}`
+      + `移動平均やATRの集計期間がその日数ぶんずれます。`);
+  }
+  el.innerHTML = msgs.map(m => `<div>${m}</div>`).join("");
+}
+
+/* 銘柄ごとの固定色。順位ではなく銘柄に色を紐づけるので、
+   保有が入れ替わっても同じ通貨は同じ色のままになる */
+const SYMBOL_COLOR = {
+  "USDJPY=X": "var(--sym-1)",
+  "EURJPY=X": "var(--sym-2)",
+  "GBPJPY=X": "var(--sym-3)",
+  "AUDJPY=X": "var(--sym-4)",
+};
+const symColor = s => SYMBOL_COLOR[s] || "var(--muted)";
+
+// 現金を含めた全体の内訳。表の構成比だけでは「どれだけ現金で待っているか」が読めない
+function renderComposition(k) {
+  const box = document.getElementById("compo");
+  const eq = k.equity || 0;
+  if (eq <= 0) { box.innerHTML = ""; return; }
+
+  // 並びは保有順ではなく銘柄の定義順に固定する。保有が入れ替わるたびに
+  // 隣り合う色の組が変わると、区別できる保証がなくなるため。
+  const order = Object.keys(SYMBOL_COLOR);
+  const parts = (k.positions || [])
+    .slice()
+    .sort((a, b) => order.indexOf(a.symbol) - order.indexOf(b.symbol))
+    .map(p => ({
+      key: p.symbol, name: p.name, value: p.value,
+      pct: p.value / eq * 100, color: symColor(p.symbol),
+    }));
+  parts.push({ key: "cash", name: "現金", value: k.cash,
+               pct: k.cash / eq * 100, color: "var(--cash)" });
+
+  const segs = parts.filter(p => p.pct > 0.05).map(p =>
+    `<span class="seg" style="width:${p.pct.toFixed(2)}%;background:${p.color}"
+           title="${p.name} ${p.pct.toFixed(1)}%"></span>`).join("");
+
+  const legend = parts.map(p =>
+    `<span class="lg"><span class="sw" style="background:${p.color}"></span>` +
+    `${p.name} <b>${p.pct.toFixed(1)}%</b> <span class="sub">${yen(p.value)}</span></span>`
+  ).join("");
+
+  box.innerHTML = `<div class="cbar">${segs}</div><div class="legend">${legend}</div>`;
+}
+
+function renderPositions(k) {
+  const box = document.getElementById("positions");
+  if (!k.positions || !k.positions.length) {
+    box.innerHTML = '<div class="empty">保有なし（現金100%）</div>';
+    return;
+  }
+  const rows = k.positions.map(p => {
+    const gapPct = (p.stop && p.price) ? (p.price - p.stop) / p.price * 100 : null;
+    return `
+    <tr>
+      <td>${p.name}<span class="sub"> ${p.symbol}</span></td>
+      <td>${p.price ? num(p.price, dec(p.price)) : "—"}</td>
+      <td>${p.stop ? num(p.stop, dec(p.stop)) : "—"}</td>
+      <td class="c-stopgap">${stopGapBar(gapPct)}</td>
+      <td>${yen(p.value)}</td>
+      <td class="${cls(p.upnl)}">${p.upnl >= 0 ? "+" : ""}${Math.round(p.upnl).toLocaleString("ja-JP")}円</td>
+      <td class="${cls(p.upnl)}">${pct(p.upnl_pct)}</td>
+      <td>${p.weight.toFixed(1)}%</td>
+    </tr>`;
+  }).join("");
+  box.innerHTML = `<table><thead><tr>
+      <th scope="col">銘柄</th><th>現在値</th><th>ストップ</th>
+      <th class="c-stopgap">ストップまで</th><th>評価額</th>
+      <th>含み損益</th><th>率</th><th>構成比</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+const num = (v, d = 0) => v === null || v === undefined
+  ? "—" : v.toLocaleString("ja-JP", { minimumFractionDigits: d, maximumFractionDigits: d });
+const signed = (v, d = 2) => v === null || v === undefined
+  ? "—" : (v >= 0 ? "+" : "") + v.toFixed(d) + "%";
+// 価格の桁が銘柄ごとに大きく違う（1000万円台〜100円台）ので小数桁を出し分ける
+const dec = p => p >= 10000 ? 0 : (p >= 100 ? 1 : 3);
+
+function renderUniverse(k) {
+  const box = document.getElementById("universe");
+  const note = document.getElementById("uni-note");
+  const u = k.universe;
+  if (!u || !u.length) {
+    box.innerHTML = '<div class="empty">銘柄データがまだありません（次のループで反映されます）</div>';
+    note.textContent = "";
+    return;
+  }
+  const rows = u.map(r => {
+    const near = r.signal_gap_pct !== null && r.signal_gap_pct <= 0;
+    // クールダウン中は「シグナルが出ても買わない」状態。
+    // 理由が見えないと「壊れている」と誤解されるので明示する。
+    const cool = !r.held && r.cooldown_until && daysUntil(r.cooldown_until) > 0;
+    const state = r.held
+      ? '<span class="pill" style="border-color:var(--good);color:var(--good)">保有中</span>'
+      : cool
+        ? `<span class="pill" style="border-color:var(--warn)" title="ストップ後の再エントリー禁止期間">`
+          + `見送り あと${daysUntil(r.cooldown_until)}日</span>`
+        : (near ? '<span class="pill" style="border-color:var(--warn)">条件充足</span>'
+                : '<span class="sub">待機</span>');
+    return `<tr>
+      <td>${r.name}<span class="sub"> ${r.symbol}</span></td>
+      <td class="c-spark">${sparkline(r.spark)}</td>
+      <td>${num(r.price, dec(r.price))}</td>
+      <td class="c-chg ${cls(r.change_pct)}">${signed(r.change_pct)}</td>
+      <td class="c-ma ${cls(r.vs_ma50_pct)}">${signed(r.vs_ma50_pct, 1)}</td>
+      <td class="c-ma ${cls(r.vs_ma200_pct)}">${signed(r.vs_ma200_pct, 1)}</td>
+      <td class="c-level">${r.signal_level === null ? "—" : num(r.signal_level, dec(r.signal_level))}</td>
+      <td>${gapBar(r.signal_gap_pct)}</td>
+      <td class="c-stop">${r.stop ? num(r.stop, dec(r.stop)) : "—"}</td>
+      <td>${state}</td>
+    </tr>`;
+  }).join("");
+  box.innerHTML = `<table><thead><tr>
+      <th scope="col">銘柄</th><th scope="col" class="c-spark">30日推移</th>
+      <th scope="col">現在値</th><th scope="col" class="c-chg">前日比</th>
+      <th scope="col" class="c-ma">50日線比</th><th scope="col" class="c-ma">200日線比</th>
+      <th scope="col" class="c-level">${u[0].signal_label || "シグナル水準"}</th>
+      <th scope="col">点灯まで</th><th scope="col" class="c-stop">ストップ</th><th scope="col">状態</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+  note.textContent = `「${u[0].signal_label || "—"}」は現在の戦略「${k.strategy}」の`
+    + `エントリー条件。相場付きが変わると基準そのものが切り替わります。`
+    + `　バーは点灯までの近さ（${GAP_REF}%以上離れていれば空、到達で満タン）。`;
+}
+
+/* 建玉率（エクスポージャー）の推移ミニグラフ。「建玉率」の統計値の下に添えて、
+   いまの数字だけでなく「上限まで攻めていた時期」が時系列で見えるようにする。
+   live_equity.csv には元から建玉率(%)列があるので、サーバ側(dashboard.py)の
+   _equity_curve が返す expo_pct をそのまま使う（新規のログは不要）。 */
+function renderExpoSpark(curve) {
+  const box = document.getElementById("exposprk");
+  const vals = (curve || []).map(p => p.expo_pct).filter(v => v !== null && v !== undefined);
+  box.innerHTML = vals.length >= 2 ? sparkline(vals.slice(-120), 130, 26) : "";
+}
+
+/* 一覧内の小さな折れ線。1行1系列なので凡例は不要 */
+function sparkline(vals, w = 92, h = 26) {
+  if (!vals || vals.length < 2) return "—";
+  const lo = Math.min(...vals), hi = Math.max(...vals), rng = (hi - lo) || 1;
+  const X = i => i / (vals.length - 1) * (w - 5) + 2.5;
+  const Y = v => (h - 3) - (v - lo) / rng * (h - 6);
+  const d = vals.map((v, i) => (i ? "L" : "M") + X(i).toFixed(1) + " " + Y(v).toFixed(1)).join(" ");
+  const n = vals.length - 1;
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
+    <path d="${d}" fill="none" stroke="var(--series)" stroke-width="1.5"
+          stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${X(n).toFixed(1)}" cy="${Y(vals[n]).toFixed(1)}" r="2.4"
+            fill="var(--series)" stroke="var(--surface)" stroke-width="1.5"/>
+  </svg>`;
+}
+
+/* 点灯までの距離。銘柄間の相対値ではなく固定基準にして、
+   他の銘柄が動いてもバーの意味が変わらないようにする */
+// 解禁日まであと何日か（当日は0日＝解禁済み扱い）
+function daysUntil(dateStr) {
+  const d = new Date(dateStr.replace(/-/g, "/"));
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.ceil((d - today) / 86400000));
+}
+
+/* 保有ポジションの「ストップまでの距離」バー。gapBarと見た目の部品（.hbar/.track/.fill）は
+   共有するが、意味が逆（近いほど良い→近いほど危険）なので色は独自に塗る。
+   到達（価格がストップ以下）は本来なら次のループで即座に手仕舞われる想定だが、
+   表示の更新が売買判断の反映より一瞬早いタイミングもあり得るため、
+   その場合の表示も用意しておく。 */
+function stopGapBar(gapPct) {
+  if (gapPct === null || gapPct === undefined) return "—";
+  const danger = gapPct <= 5;    // ストップまで5%以内は警戒色にする
+  const frac = Math.max(0.03, 1 - Math.min(Math.max(gapPct, 0), GAP_REF) / GAP_REF);
+  return `<div class="hbar"><span class="${danger ? 'bad' : ''}">${
+      gapPct <= 0 ? '到達' : `あと ${gapPct.toFixed(1)}%`}</span>
+    <span class="track"><span class="fill${danger ? ' danger' : ''}"
+      style="width:${(frac * 100).toFixed(0)}%"></span></span></div>`;
+}
+
+const GAP_REF = 30;
+function gapBar(gap) {
+  if (gap === null || gap === undefined) return "—";
+  if (gap <= 0) {
+    return `<div class="hbar"><span class="good">到達</span>
+      <span class="track"><span class="fill reached" style="width:100%"></span></span></div>`;
+  }
+  const frac = Math.max(0.03, 1 - Math.min(gap, GAP_REF) / GAP_REF);
+  return `<div class="hbar"><span>あと ${gap.toFixed(1)}%</span>
+    <span class="track"><span class="fill" style="width:${(frac * 100).toFixed(0)}%"></span></span></div>`;
+}
+
+/* いまの相場判断の内訳。監視ユニバースの「点灯まで」バー（gapBar）と同じ部品を使い、
+   レジーム判定を構成する3条件が、切り替わる閾値までどれだけ離れているかを示す。
+   数値は live_trade.py が regime.py の生値をそのまま snapshot に渡したもの
+   （ここで計算し直さない＝実運用側と表示側で判定基準がズレる心配がない）。
+   弱気の間はトレンド条件だけで決まり、ボラ・上昇銘柄比率は強気/中立の分岐にしか
+   効かない（regime.py の分岐と同じ）。それでも3つとも表示するのは、
+   弱気から抜けた直後にどちらへ転ぶか（強気か中立か）の見通しにもなるため。 */
+function renderRegimeBars(k) {
+  const box = document.getElementById("regimebars");
+  if (k.trend_pct === null || k.trend_pct === undefined) { box.innerHTML = ""; return; }
+  const rows = [
+    { label: "大局トレンド（200日線比）",
+      detail: signed(k.trend_pct, 1),
+      gap: k.trend_pct >= 0 ? 0 : -k.trend_pct },
+    { label: `ボラティリティ（閾値 年率${k.vol_high_pct.toFixed(0)}%未満）`,
+      detail: k.vol_pct === null ? "—" : `年率${k.vol_pct.toFixed(0)}%`,
+      gap: k.vol_pct === null ? 0 : Math.max(0, k.vol_pct - k.vol_high_pct) },
+    { label: `上昇銘柄比率（閾値 ${k.breadth_min_pct.toFixed(0)}%以上）`,
+      detail: `${k.breadth_pct.toFixed(0)}%`,
+      gap: Math.max(0, k.breadth_min_pct - k.breadth_pct) },
+  ];
+  box.innerHTML = rows.map(r => `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:7px">
+      <span class="sub">${r.label} <b style="color:var(--ink)">${r.detail}</b></span>
+      ${gapBar(r.gap)}
+    </div>`).join("");
+}
+
+// 帯は色だけで意味を持たせない。出現したレジームぶんだけ凡例を出す。
+function renderRegimeLegend(seen, mode) {
+  const el = document.getElementById("rlegend");
+  const parts = [];
+  if (mode === "bar") {
+    parts.push(`<span class="lg"><span class="sw" style="background:var(--good)"></span>増加</span>`
+      + `<span class="lg"><span class="sw" style="background:var(--bad)"></span>減少</span>`);
+  }
+  if (seen && seen.length) {
+    parts.push('<span class="sub">グラフ下の帯＝そのときの相場付き：</span>'
+      + seen.map(r => `<span class="lg"><span class="sw" style="background:${REGIME_COLOR[r]}"></span>${r}</span>`).join(""));
+  }
+  el.innerHTML = parts.join(" ");
+}
+
+// エラーが無いときはカードごと隠す。常設すると「異常が普通」に見えてしまう。
+// 直近5件（errs）が空でも、過去14日のどこかで発生していれば（freq）カードは出す
+// ——「今は治まっているが、少し前に荒れていた」も見逃し防止として拾いたいため。
+function renderErrors(errs, freq) {
+  const card = document.getElementById("errcard");
+  const box = document.getElementById("errors");
+  const freqTotal = (freq || []).reduce((a, f) => a + f.count, 0);
+  if ((!errs || !errs.length) && freqTotal === 0) {
+    card.hidden = true; box.innerHTML = ""; document.getElementById("errfreq").innerHTML = "";
+    return;
+  }
+  card.hidden = false;
+  box.innerHTML = (errs && errs.length)
+    ? errs.map(e =>
+        `<div class="errline">${e.replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]))}</div>`
+      ).join("")
+    : '<div class="empty">直近のエラーはありません</div>';
+  renderErrorFreq(freq);
+}
+
+/* 週次・月次の集計は大げさなので、直近14日を1日ずつの棒で並べる簡易トレンド。
+   0件の日も細い棒（高さ2px）を残して「その日は発生していない」ことを可視化する。
+   1〜2回のノイズと、頻度そのものが増えている劣化の兆候を見分けやすくするのが目的。 */
+function renderErrorFreq(freq) {
+  const box = document.getElementById("errfreq");
+  if (!freq || !freq.length) { box.innerHTML = ""; return; }
+  const max = Math.max(...freq.map(f => f.count), 1);
+  const bars = freq.map(f => {
+    const h = f.count === 0 ? 2 : Math.max(4, Math.round(f.count / max * 22));
+    const color = f.count === 0 ? "var(--grid)" : "var(--bad)";
+    return `<span title="${f.date}: ${f.count}件" style="display:inline-block;width:6px;
+      height:${h}px;background:${color};border-radius:1px;vertical-align:bottom"></span>`;
+  }).join(" ");
+  box.innerHTML = `<div class="sub" style="margin-top:12px">直近14日のエラー発生件数</div>
+    <div style="display:flex;gap:2px;align-items:flex-end;height:24px;margin-top:4px">${bars}</div>`;
+}
+
+function renderStats(st) {
+  const box = document.getElementById("stats");
+  if (!st || !st.count) {
+    box.innerHTML = '<div class="empty">まだ決済がありません。'
+      + '（売って初めて確定します。保有中の含み損益は上の「資産の内訳」を見てください）</div>';
+    return;
+  }
+  const jp = v => (v >= 0 ? "+" : "") + Math.round(v).toLocaleString("ja-JP") + "円";
+  const items = [
+    ["累計実現損益", jp(st.total), cls(st.total)],
+    ["決済回数", `${st.count}回`, ""],
+    ["勝率", `${st.win_rate.toFixed(0)}%（${st.wins}/${st.count}）`, ""],
+    ["平均利益", jp(st.avg_win), "good"],
+    ["平均損失", jp(st.avg_loss), "bad"],
+    ["プロフィットファクター",
+      st.profit_factor === null ? "—" : st.profit_factor.toFixed(2), ""],
+    ["最大の利益", jp(st.best), "good"],
+    ["最大の損失", jp(st.worst), "bad"],
+  ];
+  box.innerHTML = '<div class="stats" style="border-top:none;padding-top:0;margin-top:0">'
+    + items.map(([k, v, c]) =>
+        `<div class="stat"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join("")
+    + "</div>" + symbolPnl(st.by_symbol) + holdingDist(st.holding);
+}
+
+/* 保有期間の分布。ホイップソー（往復売買）の傾向は、個々の損益だけを見ていても
+   気づきにくい。broker.py は銘柄単位でポジションを合算管理しており個別ロットを
+   区別しないため、ここでの「保有期間」も同じ単位（最初の買い→ゼロに戻す売り）
+   で揃えている（dashboard.py の _holding_periods 参照）。 */
+function holdingDist(h) {
+  if (!h || !h.count) return "";
+  const max = Math.max(...h.buckets.map(b => b.count), 1);
+  const rows = h.buckets.map(b => `
+    <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+      <span class="sub" style="width:64px;flex:none">${b.label}</span>
+      <span class="track" style="flex:1;height:8px;border-radius:4px;background:var(--grid);overflow:hidden">
+        <span style="display:block;height:100%;width:${(b.count / max * 100).toFixed(0)}%;
+          background:linear-gradient(90deg,var(--series-dim),var(--series))"></span>
+      </span>
+      <span class="sub" style="width:36px;text-align:right">${b.count}件</span>
+    </div>`).join("");
+  return `<div class="sub" style="margin-top:18px">保有期間の分布`
+    + `（決済済み${h.count}件・中央値${h.median_days.toFixed(1)}日）</div>${rows}`;
+}
+
+/* 銘柄別の損益。全体の合計だけでは「どの通貨で勝てているか」が分からない。
+   確定した実現損益と、いま抱えている含み損益を並べる。 */
+function symbolPnl(rows) {
+  if (!rows || !rows.length) return "";
+  const held = {};
+  if (LAST && LAST.snapshot) {
+    (LAST.snapshot.positions || []).forEach(p => { held[p.symbol] = p.upnl; });
+  }
+  const keys = new Set(rows.map(r => r.symbol).concat(Object.keys(held)));
+  const merged = [...keys].map(s => {
+    const r = rows.find(x => x.symbol === s) || { realized: 0, count: 0, wins: 0 };
+    const u = held[s] || 0;
+    return { symbol: s, realized: r.realized, count: r.count, wins: r.wins,
+             unrealized: u, total: r.realized + u };
+  }).sort((a, b) => b.total - a.total);
+
+  const jp = v => (v >= 0 ? "+" : "") + Math.round(v).toLocaleString("ja-JP") + "円";
+  const body = merged.map(m => `<tr>
+      <td><span class="swi" style="background:${symColor(m.symbol)}"></span>${m.symbol}</td>
+      <td class="${cls(m.realized)}">${jp(m.realized)}</td>
+      <td class="${cls(m.unrealized)}">${m.unrealized ? jp(m.unrealized) : "—"}</td>
+      <td class="${cls(m.total)}"><b>${jp(m.total)}</b></td>
+      <td>${m.count ? m.count + "回" : "—"}</td>
+      <td>${m.count ? Math.round(m.wins / m.count * 100) + "%" : "—"}</td>
+    </tr>`).join("");
+  return `<div class="scroll" style="margin-top:18px"><table><thead><tr>
+      <th scope="col">銘柄</th><th>実現損益</th><th>含み損益</th><th>合計</th><th>決済</th><th>勝率</th>
+    </tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/* 直近hours時間での資産の増減。「増減」棒グラフのdeltaを積み上げても
+   同じ値になるが、区間の起点と終点だけ見れば足りるのでここでは都度計算する。
+   起点は「カットオフ以降で最初に記録された点」。運用開始から日が浅く
+   その時点のデータが無い場合は、最古の記録を起点にした「開始からの」値として返す。 */
+function periodDelta(curve, hours) {
+  if (!curve || curve.length < 2) return null;
+  const cutoff = Date.now() - hours * 3600 * 1000;
+  const first = curve[0], last = curve[curve.length - 1];
+  const partial = parseTs(first.t) > cutoff;
+  const base = partial ? first : (curve.find(p => parseTs(p.t) >= cutoff) || first);
+  if (base === last) return null;
+  const delta = last.equity - base.equity;
+  const deltaPct = base.equity ? (last.equity / base.equity - 1) * 100 : 0;
+  return { delta, deltaPct, partial };
+}
+
+function renderPeriodSummary(curve) {
+  const box = document.getElementById("periodsummary");
+  const periods = [["直近7日", 24 * 7], ["直近30日", 24 * 30]];
+  const items = periods.map(([label, hours]) => {
+    const d = periodDelta(curve, hours);
+    if (!d) return `<div class="stat"><div class="k">${label}</div><div class="v">—</div></div>`;
+    const jp = (d.delta >= 0 ? "+" : "") + Math.round(d.delta).toLocaleString("ja-JP") + "円";
+    return `<div class="stat">
+        <div class="k">${label}${d.partial ? "（運用開始から）" : ""}</div>
+        <div class="v ${cls(d.delta)}">${jp} （${pct(d.deltaPct)}）</div>
+      </div>`;
+  });
+  box.innerHTML = '<div class="stats" style="border-top:none;padding-top:0;margin-top:0">'
+    + items.join("") + "</div>";
+}
+
+/* ダウンロードリンクは記録が無いうちは404になるだけなので隠しておく。
+   売買履歴は最初の1件が決済されるまでファイル自体が存在しない
+   （live_trade.py の _log_trades 参照）。 */
+function updateDownloadLinks(s) {
+  const eq = document.getElementById("equitydl");
+  eq.hidden = !s.curve || s.curve.length === 0;
+  eq.href = EQUITY_CSV_URL;
+  const tr = document.getElementById("tradesdl");
+  tr.hidden = !s.trades || s.trades.length === 0;
+  tr.href = TRADES_CSV_URL;
+}
+
+function renderTrades(trades) {
+  const box = document.getElementById("trades");
+  if (!trades || !trades.length) {
+    box.innerHTML = '<div class="empty">まだ売買はありません</div>';
+    return;
+  }
+  const rows = trades.map(t => `
+    <tr>
+      <td>${t.t}</td>
+      <td>${t.symbol}</td>
+      <td>${t.side}</td>
+      <td class="c-level">${num(t.price, dec(t.price))}</td>
+      <td>${yen(t.amount)}</td>
+      <td class="${t.realized === null ? "" : cls(t.realized)}">${
+        t.realized === null ? "—"
+        : (t.realized >= 0 ? "+" : "") + Math.round(t.realized).toLocaleString("ja-JP") + "円"}</td>
+      <td class="c-chg">${t.reason}</td>
+    </tr>`).join("");
+  box.innerHTML = `<table><thead><tr>
+      <th scope="col">日時</th><th scope="col">銘柄</th><th scope="col">売買</th>
+      <th scope="col" class="c-level">約定単価</th><th scope="col">金額</th>
+      <th scope="col">実現損益</th><th scope="col" class="c-chg">理由</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+/* ---- 資産推移チャート（外部ライブラリなし） ---- */
+const svg = document.getElementById("chart");
+const tip = document.getElementById("tip");
+let PLOT = null;
+
+/* レジーム帯の色。相場の危険度そのものなので状態色を使い、
+   色だけに意味を持たせないよう必ず凡例を添える */
+const REGIME_COLOR = { "強気": "var(--good)", "中立": "var(--muted)", "弱気": "var(--bad)" };
+
+/* 期間フィルタ。長期運用でチャートが潰れないように */
+let RANGE_H = 0;                       // 0 = 全期間
+const parseTs = s => new Date(s.replace(/-/g, "/")).getTime();
+
+function filterCurve(curve) {
+  if (!RANGE_H || !curve || curve.length < 3) return curve;
+  const cutoff = Date.now() - RANGE_H * 3600 * 1000;
+  const f = curve.filter(p => parseTs(p.t) >= cutoff);
+  return f.length >= 2 ? f : curve.slice(-2);   // 期間内に点が無くても線は描く
+}
+
+document.getElementById("ranges").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  RANGE_H = Number(b.dataset.h);
+  e.currentTarget.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+  if (LAST) drawChart(LAST.curve, LAST.snapshot ? LAST.snapshot.capital : 1000000);
+});
+
+/* 表示モード。'line'=総資産の推移、'bar'=記録間隔ごとの増減、'dd'=ピーク比（ドローダウン）。
+   将来 'bar-daily'（日次集約）を追加の値として足す想定。 */
+let CHART_MODE = "line";
+document.getElementById("chartmode").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  CHART_MODE = b.dataset.mode;
+  e.currentTarget.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+  if (LAST) drawChart(LAST.curve, LAST.snapshot ? LAST.snapshot.capital : 1000000);
+});
+
+/* 時刻の目盛り。線・棒どちらのグラフからも呼ぶ共通ロジック。
+   全点に文字は置かず、両端＋中央だけ。表示範囲が2日以内なら時刻、
+   それ以上なら日付。狭い画面では中央を省いて重なりを防ぐ。 */
+function timeAxisLabels(curve, X, W, H, m, narrow) {
+  let g = "";
+  const spanH = curve.length > 1
+    ? (parseTs(curve[curve.length - 1].t) - parseTs(curve[0].t)) / 3600000 : 0;
+  const fmt = t => spanH <= 48 ? t.slice(11, 16) : t.slice(5, 10);
+  const idxs = narrow ? [0, curve.length - 1]
+                      : [0, Math.floor(curve.length / 2), curve.length - 1];
+  idxs.forEach((i, n) => {
+    if (curve.length < 2 && n) return;
+    const anchor = n === 0 ? "start" : (n === idxs.length - 1 ? "end" : "middle");
+    g += `<text x="${X(i)}" y="${H - 8}" text-anchor="${anchor}" fill="var(--muted)"
+           font-size="11">${fmt(curve[i].t)}</text>`;
+  });
+  // 時刻だけの表示になったときは、どの日かを軸の見出しで補う。
+  // 日付をまたぐ範囲で末日だけを出すと、前日の時刻ラベルが誤読される。
+  if (spanH <= 48 && curve.length > 1) {
+    const d0 = curve[0].t.slice(0, 10), d1 = curve[curve.length - 1].t.slice(0, 10);
+    const head = d0 === d1 ? d1 : `${d0.slice(5)} → ${d1.slice(5)}`;
+    g += `<text x="${W - m.r}" y="${m.t + 2}" text-anchor="end" fill="var(--muted)"
+           font-size="10">${head}</text>`;
+  }
+  return g;
+}
+
+/* レジーム帯。曲線/棒の形が「なぜそうなったか」は、そのとき何を選んでいたかで決まる。
+   マークに直接色を重ねると読みにくくなるので、下に細い帯として敷く。
+   戻り値の seen は renderRegimeLegend に渡す出現順リスト。 */
+function regimeRibbon(curve, X, ribbonY, RIBBON_H) {
+  let g = "";
+  const seen = [];
+  if (!curve.some(p => p.regime)) return { svg: g, seen };
+  let start = 0;
+  for (let i = 1; i <= curve.length; i++) {
+    if (i === curve.length || curve[i].regime !== curve[start].regime) {
+      const r = curve[start].regime || "";
+      const x0 = X(start), x1 = i === curve.length ? X(curve.length - 1) : X(i);
+      if (r && !seen.includes(r)) seen.push(r);
+      g += `<rect x="${x0.toFixed(1)}" y="${ribbonY}" width="${Math.max(1, x1 - x0).toFixed(1)}"
+             height="${RIBBON_H}" fill="${REGIME_COLOR[r] || "var(--muted)"}" opacity="0.85"/>`;
+      start = i;
+    }
+  }
+  return { svg: g, seen };
+}
+
+/* CHART_MODE を見て線・棒どちらかを描く。個々の drawXChart はホバー用の
+   イベントリスナーも自分で張り直す（前回のリスナーは innerHTML の書き換えで
+   要素ごと消えるので、張り直し漏れの心配はない）。 */
+function drawChart(fullCurve, capital) {
+  if (CHART_MODE === "bar") drawBarChart(fullCurve, capital);
+  else if (CHART_MODE === "dd") drawDrawdownChart(fullCurve, capital);
+  else drawLineChart(fullCurve, capital);
+}
+
+function drawLineChart(fullCurve, capital) {
+  const curve = filterCurve(fullCurve);
+  const W = svg.clientWidth || 800, H = 260;
+  const narrow = W < 460;
+  // 狭い画面では左余白を詰める。74pxのままだと297px幅の1/4を軸ラベルが占めてしまう
+  // 下余白はレジーム帯（8px）とX軸ラベルの分を確保する
+  const m = { t: 12, r: 14, b: 44, l: narrow ? 50 : 74 };
+  const RIBBON_H = 8;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("height", H);
+
+  if (!curve || curve.length === 0) {
+    svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle"
+      fill="var(--muted)" font-size="13">記録がまだありません</text>`;
+    PLOT = null;
+    renderRegimeLegend([]);
+    return;
+  }
+
+  const vals = curve.map(p => p.equity);
+  let lo = Math.min(...vals, capital), hi = Math.max(...vals, capital);
+  // 資産がほぼ動いていない時期は、元手の±1%を窓にする。
+  // 極小の範囲に目盛りを打つと「100万」が4つ並んで意味をなさなくなるため。
+  if (hi - lo < capital * 0.005) {
+    const mid = (hi + lo) / 2;
+    lo = mid - capital * 0.01;
+    hi = mid + capital * 0.01;
+  } else {
+    const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
+  }
+  const dec = (hi - lo) < 200000 ? 1 : 0;             // 狭い窓では小数第1位まで出す
+
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const X = i => m.l + (curve.length === 1 ? iw / 2 : i / (curve.length - 1) * iw);
+  const Y = v => m.t + (1 - (v - lo) / (hi - lo)) * ih;
+
+  // 面の塗りは上だけ濃く、下に向けて消す。平坦な線でも青一色の塊にならない
+  let g = `<defs>
+    <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="var(--series)" stop-opacity="0.34"/>
+      <stop offset="55%"  stop-color="var(--series)" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="var(--series)" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="lineGlow" x="-20%" y="-40%" width="140%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>`;
+  // 横罫線と目盛り
+  for (let i = 0; i <= 3; i++) {
+    const v = lo + (hi - lo) * i / 3, y = Y(v);
+    g += `<line x1="${m.l}" y1="${y}" x2="${W - m.r}" y2="${y}"
+           stroke="var(--grid)" stroke-width="1"/>`;
+    g += `<text x="${m.l - 8}" y="${y + 4}" text-anchor="end" fill="var(--muted)"
+           font-size="11">${(v / 10000).toFixed(dec)}万</text>`;
+  }
+  // 元手のライン
+  const yc = Y(capital);
+  g += `<line x1="${m.l}" y1="${yc}" x2="${W - m.r}" y2="${yc}"
+         stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 4"/>`;
+  g += `<text x="${W - m.r}" y="${yc - 6}" text-anchor="end" fill="var(--muted)"
+         font-size="11">元手 ${(capital/10000).toFixed(0)}万円</text>`;
+
+  const pts = curve.map((p, i) => [X(i), Y(p.equity)]);
+  const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  g += `<path d="${line} L ${pts[pts.length-1][0].toFixed(1)} ${m.t+ih} L ${pts[0][0].toFixed(1)} ${m.t+ih} Z"
+         fill="url(#areaGrad)"/>`;
+  g += `<path d="${line}" fill="none" stroke="var(--series)" stroke-width="2"
+         stroke-linejoin="round" stroke-linecap="round" filter="url(#lineGlow)" opacity="0.5"/>`;
+  g += `<path d="${line}" fill="none" stroke="var(--series)" stroke-width="2"
+         stroke-linejoin="round" stroke-linecap="round"/>`;
+  // 記録が1点だけだと線が引けず、グラフが空に見えてしまう。点として示す
+  if (pts.length === 1) {
+    g += `<circle cx="${pts[0][0].toFixed(1)}" cy="${pts[0][1].toFixed(1)}" r="4.5"
+           fill="var(--series)" stroke="var(--surface)" stroke-width="2"/>`;
+  }
+
+  const ribbonY = m.t + ih + 6;
+  const ribbon = regimeRibbon(curve, X, ribbonY, RIBBON_H);
+  g += ribbon.svg;
+  g += timeAxisLabels(curve, X, W, H, m, narrow);
+
+  g += `<line id="cross" x1="0" y1="${m.t}" x2="0" y2="${m.t + ih}"
+         stroke="var(--axis)" stroke-width="1" opacity="0"/>`;
+  g += `<circle id="dot" r="4.5" fill="var(--series)" stroke="var(--surface)"
+         stroke-width="2" opacity="0"/>`;
+  g += `<rect id="hit" x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent"/>`;
+  svg.innerHTML = g;
+
+  renderRegimeLegend(ribbon.seen);
+  PLOT = { curve, X, Y, m, iw, W, capital, mode: "line" };
+  const hit = svg.querySelector("#hit");
+  hit.addEventListener("mousemove", onHoverLine);
+  hit.addEventListener("mouseleave", hideTip);
+}
+
+/* 記録間隔ごとの増減（delta）を diverging bar で見せる。
+   1件目は前の記録が無いので delta が無く、棒は立たない（filter で除く）。
+   将来「日次」を足すときは、ここで日ごとに delta を合算した配列を渡す
+   drawBarChart(dailyCurve, capital, { unit: "day" }) のような形を想定。 */
+function drawBarChart(fullCurve, capital) {
+  const filtered = filterCurve(fullCurve);
+  const curve = (filtered || []).filter(p => p.delta !== null && p.delta !== undefined);
+  const W = svg.clientWidth || 800, H = 260;
+  const narrow = W < 460;
+  const m = { t: 12, r: 14, b: 44, l: narrow ? 50 : 74 };
+  const RIBBON_H = 8;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("height", H);
+
+  if (curve.length === 0) {
+    svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle"
+      fill="var(--muted)" font-size="13">まだ増減の記録がありません</text>`;
+    PLOT = null;
+    renderRegimeLegend([]);
+    return;
+  }
+
+  const deltas = curve.map(p => p.delta);
+  // ゼロ除算・全ゼロ対策。最小でも1円幅は確保する
+  let maxAbs = Math.max(...deltas.map(Math.abs), 1) * 1.15;
+  const lo = -maxAbs, hi = maxAbs;
+  const dec = maxAbs < 200000 ? 1 : 0;
+
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const X = i => m.l + (i + 0.5) / curve.length * iw;   // バー中心のX座標
+  const Y = v => m.t + (1 - (v - lo) / (hi - lo)) * ih;
+  const yZero = Y(0);
+  // dataviz: 塗り同士は2pxの隙間で区切る（線で区切らない）
+  const barGap = 2;
+  const barW = Math.max(1, iw / curve.length - barGap);
+
+  let g = "";
+  // 横罫線と目盛り（0を中心に上下2本）
+  for (const frac of [-1, 0, 1]) {
+    const v = frac * maxAbs, y = Y(v);
+    g += `<line x1="${m.l}" y1="${y}" x2="${W - m.r}" y2="${y}"
+           stroke="var(--grid)" stroke-width="1"/>`;
+    g += `<text x="${m.l - 8}" y="${y + 4}" text-anchor="end" fill="var(--muted)"
+           font-size="11">${v > 0 ? "+" : ""}${(v / 10000).toFixed(dec)}万</text>`;
+  }
+  // ゼロラインは基準線として少し太くする
+  g += `<line x1="${m.l}" y1="${yZero}" x2="${W - m.r}" y2="${yZero}"
+         stroke="var(--axis)" stroke-width="1.4"/>`;
+
+  curve.forEach((p, i) => {
+    const x = X(i) - barW / 2;
+    const yTop = Y(Math.max(0, p.delta));
+    const yBot = Y(Math.min(0, p.delta));
+    const color = p.delta >= 0 ? "var(--good)" : "var(--bad)";
+    g += `<rect class="bar" data-i="${i}" x="${x.toFixed(1)}" y="${yTop.toFixed(1)}"
+           width="${barW.toFixed(1)}" height="${Math.max(1.5, yBot - yTop).toFixed(1)}"
+           rx="2" fill="${color}"/>`;
+  });
+
+  const ribbonY = m.t + ih + 6;
+  const ribbon = regimeRibbon(curve, X, ribbonY, RIBBON_H);
+  g += ribbon.svg;
+  g += timeAxisLabels(curve, X, W, H, m, narrow);
+
+  // ホバー中のバーを示す縁取り（線グラフの cross/dot に相当）
+  g += `<rect id="barHi" x="0" y="${m.t}" width="${barW}" height="${ih}"
+         fill="none" stroke="var(--ink)" stroke-width="1.5" rx="2" opacity="0"/>`;
+  g += `<rect id="hit" x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent"/>`;
+  svg.innerHTML = g;
+
+  renderRegimeLegend(ribbon.seen, "bar");
+  PLOT = { curve, X, Y, m, iw, W, capital, mode: "bar", barW };
+  const hit = svg.querySelector("#hit");
+  hit.addEventListener("mousemove", onHoverBar);
+  hit.addEventListener("mouseleave", hideTip);
+}
+
+/* ピーク比（ドローダウン）の推移。プラスにはならない指標なので、
+   0%を上端に固定して常に0以下の面を塗る（棒グラフの±0中心とは違う設計）。
+   dd_pct はサーバ側で間引き前の全履歴から計算済み（dashboard.py 参照）。 */
+function drawDrawdownChart(fullCurve, capital) {
+  const filtered = filterCurve(fullCurve);
+  const curve = (filtered || []).filter(p => p.dd_pct !== null && p.dd_pct !== undefined);
+  const W = svg.clientWidth || 800, H = 260;
+  const narrow = W < 460;
+  const m = { t: 12, r: 14, b: 44, l: narrow ? 50 : 74 };
+  const RIBBON_H = 8;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("height", H);
+
+  if (curve.length === 0) {
+    svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle"
+      fill="var(--muted)" font-size="13">記録がまだありません</text>`;
+    PLOT = null;
+    renderRegimeLegend([]);
+    return;
+  }
+
+  let lo = Math.min(...curve.map(p => p.dd_pct), 0);
+  const hi = 0;
+  // ドローダウンがまだ小さい/無いときは、0%付近に潰れて見えないよう最小窓を確保する
+  if (hi - lo < 1) lo = -1;
+  lo -= (hi - lo) * 0.12;
+  const dec = (hi - lo) < 5 ? 2 : 1;
+
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const X = i => m.l + (curve.length === 1 ? iw / 2 : i / (curve.length - 1) * iw);
+  const Y = v => m.t + (1 - (v - lo) / (hi - lo)) * ih;
+
+  let g = `<defs>
+    <linearGradient id="ddGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="var(--bad)" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="var(--bad)" stop-opacity="0.30"/>
+    </linearGradient>
+  </defs>`;
+  for (let i = 0; i <= 3; i++) {
+    const v = lo + (hi - lo) * i / 3, y = Y(v);
+    g += `<line x1="${m.l}" y1="${y}" x2="${W - m.r}" y2="${y}"
+           stroke="var(--grid)" stroke-width="1"/>`;
+    g += `<text x="${m.l - 8}" y="${y + 4}" text-anchor="end" fill="var(--muted)"
+           font-size="11">${v.toFixed(dec)}%</text>`;
+  }
+  const y0 = Y(0);
+  g += `<line x1="${m.l}" y1="${y0}" x2="${W - m.r}" y2="${y0}"
+         stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 4"/>`;
+
+  const pts = curve.map((p, i) => [X(i), Y(p.dd_pct)]);
+  const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  g += `<path d="${line} L ${pts[pts.length-1][0].toFixed(1)} ${y0.toFixed(1)} L ${pts[0][0].toFixed(1)} ${y0.toFixed(1)} Z"
+         fill="url(#ddGrad)"/>`;
+  g += `<path d="${line}" fill="none" stroke="var(--bad)" stroke-width="2"
+         stroke-linejoin="round" stroke-linecap="round"/>`;
+  if (pts.length === 1) {
+    g += `<circle cx="${pts[0][0].toFixed(1)}" cy="${pts[0][1].toFixed(1)}" r="4.5"
+           fill="var(--bad)" stroke="var(--surface)" stroke-width="2"/>`;
+  }
+
+  const ribbonY = m.t + ih + 6;
+  const ribbon = regimeRibbon(curve, X, ribbonY, RIBBON_H);
+  g += ribbon.svg;
+  g += timeAxisLabels(curve, X, W, H, m, narrow);
+
+  g += `<line id="cross" x1="0" y1="${m.t}" x2="0" y2="${m.t + ih}"
+         stroke="var(--axis)" stroke-width="1" opacity="0"/>`;
+  g += `<circle id="dot" r="4.5" fill="var(--bad)" stroke="var(--surface)"
+         stroke-width="2" opacity="0"/>`;
+  g += `<rect id="hit" x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent"/>`;
+  svg.innerHTML = g;
+
+  renderRegimeLegend(ribbon.seen);
+  PLOT = { curve, X, Y, m, iw, W, capital, mode: "dd" };
+  const hit = svg.querySelector("#hit");
+  hit.addEventListener("mousemove", onHoverDrawdown);
+  hit.addEventListener("mouseleave", hideTip);
+}
+
+/* イベントからバー/点のインデックスを引く共通処理。線・棒どちらも
+   「x座標→最寄りのインデックス」という点では同じなので、ここだけ共有する。 */
+function hoverIndex(e) {
+  const box = svg.getBoundingClientRect();
+  // タブが非表示・パネルが畳まれている等で幅が0のことがある。
+  // そのまま割ると位置がNaNになり、Math.min/max はNaNを素通しするため
+  // 添字が壊れて落ちる。ここで弾く。
+  if (!(box.width > 0)) return null;
+  const scale = PLOT.W / box.width;
+  const x = (e.clientX - box.left) * scale;
+  const n = PLOT.curve.length;
+  let i = n === 1 ? 0 : Math.round((x - PLOT.m.l) / PLOT.iw * (n - 1));
+  if (!Number.isFinite(i)) return null;
+  i = Math.max(0, Math.min(n - 1, i));
+  return { i, box, scale };
+}
+
+function onHoverLine(e) {
+  if (!PLOT) return;
+  const hit = hoverIndex(e);
+  if (!hit) return;
+  const { i, box, scale } = hit;
+  const p = PLOT.curve[i], px = PLOT.X(i), py = PLOT.Y(p.equity);
+
+  const cross = svg.querySelector("#cross"), dot = svg.querySelector("#dot");
+  cross.setAttribute("x1", px); cross.setAttribute("x2", px); cross.setAttribute("opacity", "1");
+  dot.setAttribute("cx", px); dot.setAttribute("cy", py); dot.setAttribute("opacity", "1");
+
+  // PLOT.capital は drawLineChart に渡された元手をそのまま保持している。
+  // ここで 1000000 を決め打ちすると、drawLineChart 側の挙動と食い違う
+  // （現状は CAPITAL=1,000,000 と一致しているため表面化していないだけ）
+  const diff = p.equity - PLOT.capital;
+  tip.innerHTML = `<div class="sub">${p.t}</div>
+    <div class="big">${yen(p.equity)}</div>
+    <div class="${cls(diff)}">${diff >= 0 ? "+" : ""}${Math.round(diff).toLocaleString("ja-JP")}円</div>
+    ${p.regime ? `<div class="sub">${p.regime}</div>` : ""}`;
+  tip.style.opacity = "1";
+  const left = px / scale + 14;
+  tip.style.left = Math.min(left, box.width - tip.offsetWidth - 8) + "px";
+  tip.style.top = (py / scale - 10) + "px";
+}
+
+function onHoverBar(e) {
+  if (!PLOT) return;
+  const hit = hoverIndex(e);
+  if (!hit) return;
+  const { i, box, scale } = hit;
+  const p = PLOT.curve[i], px = PLOT.X(i);
+  const d = p.delta;
+
+  const barHi = svg.querySelector("#barHi");
+  barHi.setAttribute("x", (px - PLOT.barW / 2).toFixed(1));
+  barHi.setAttribute("opacity", "1");
+
+  tip.innerHTML = `<div class="sub">${p.t}</div>
+    <div class="big ${cls(d)}">${d >= 0 ? "+" : ""}${Math.round(d).toLocaleString("ja-JP")}円</div>
+    <div class="sub">総資産 ${yen(p.equity)}</div>
+    ${p.regime ? `<div class="sub">${p.regime}</div>` : ""}`;
+  tip.style.opacity = "1";
+  const py = PLOT.Y(Math.max(0, d));
+  const left = px / scale + 14;
+  tip.style.left = Math.min(left, box.width - tip.offsetWidth - 8) + "px";
+  tip.style.top = (py / scale - 10) + "px";
+}
+
+function onHoverDrawdown(e) {
+  if (!PLOT) return;
+  const hit = hoverIndex(e);
+  if (!hit) return;
+  const { i, box, scale } = hit;
+  const p = PLOT.curve[i], px = PLOT.X(i), py = PLOT.Y(p.dd_pct);
+
+  const cross = svg.querySelector("#cross"), dot = svg.querySelector("#dot");
+  cross.setAttribute("x1", px); cross.setAttribute("x2", px); cross.setAttribute("opacity", "1");
+  dot.setAttribute("cx", px); dot.setAttribute("cy", py); dot.setAttribute("opacity", "1");
+
+  tip.innerHTML = `<div class="sub">${p.t}</div>
+    <div class="big ${p.dd_pct < 0 ? "bad" : ""}">${p.dd_pct.toFixed(2)}%</div>
+    <div class="sub">総資産 ${yen(p.equity)}</div>
+    ${p.regime ? `<div class="sub">${p.regime}</div>` : ""}`;
+  tip.style.opacity = "1";
+  const left = px / scale + 14;
+  tip.style.left = Math.min(left, box.width - tip.offsetWidth - 8) + "px";
+  tip.style.top = (py / scale - 10) + "px";
+}
+
+function hideTip() {
+  tip.style.opacity = "0";
+  const c = svg.querySelector("#cross"), d = svg.querySelector("#dot");
+  if (c) c.setAttribute("opacity", "0");
+  if (d) d.setAttribute("opacity", "0");
+  const bh = svg.querySelector("#barHi");
+  if (bh) bh.setAttribute("opacity", "0");
+}
+
+/* ---- 自動更新 ---- */
+const REFRESH_MS = 15000;
+let timer = null, lastFetch = null;
+
+/* 中身が変わったかの指紋。トレーダーは5分に1度しか書かないのに画面は15秒ごとに
+   問い合わせるので、そのまま描き直すと20回に19回は無駄なうえ、
+   選択中のテキストが毎回解除されて数値をコピーできない。 */
+let lastSig = null;
+function signature(s) {
+  const k = s.snapshot;
+  return JSON.stringify([
+    s.running, s.heartbeat, s.stale_reason,
+    k && k.ts, k && k.equity, k && k.regime,
+    s.curve.length, s.trades.length,
+    s.stats && s.stats.count, s.errors && s.errors.length,
+  ]);
+}
+
+/* 取得先。ローカルサーバでは /api/state、GitHub Pages などの静的配信では
+   publish_static.py が書き出した state.json を読む（index.html 側で差し替える） */
+const STATE_URL = window.STATE_URL || "/api/state";
+/* CSVダウンロード先。ローカルサーバは専用エンドポイントを持つ。静的配信では
+   publish_static.py が results/ をそのまま同梱しているので、そこへの相対パスを直接指す
+   （state.json と同じ差し替え方式。publish_static.py 参照）。 */
+const EQUITY_CSV_URL = window.EQUITY_CSV_URL || "/download/live_equity.csv";
+const TRADES_CSV_URL = window.TRADES_CSV_URL || "/download/live_trades.csv";
+
+async function refresh() {
+  let data;
+  try {
+    const r = await fetch(STATE_URL, { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    data = await r.json();
+  } catch (e) {
+    // ここに来るのは通信の失敗だけ。描画の失敗と混ぜると原因が隠れる
+    const badge = document.getElementById("status");
+    badge.className = "badge off";
+    badge.innerHTML = '<span class="dot"></span>取得できません';
+    document.getElementById("updated").textContent =
+      STATE_URL === "/api/state" ? "dashboard.py が停止している可能性があります"
+                                 : `${STATE_URL} を読み込めません（${e.message}）`;
+    tickAge();
+    return;
+  }
+  try {
+    const sig = signature(data);
+    if (sig !== lastSig) {
+      render(data);          // 中身が変わったときだけ描き直す
+      lastSig = sig;
+    } else {
+      LAST = data;           // 最新は保持するが DOM は触らない
+    }
+    lastFetch = new Date();
+  } catch (e) {
+    // データは取れたのに描けなかった＝こちらの不具合。取得失敗と区別して見せる
+    const badge = document.getElementById("status");
+    badge.className = "badge off";
+    badge.innerHTML = '<span class="dot"></span>表示エラー';
+    document.getElementById("updated").textContent =
+      `画面の描画に失敗しました: ${e.message}`;
+    console.error("render failed", e);
+  }
+  tickAge();
+}
+
+// lastFetch は「通信が成功した時刻」であって「中身が変わった時刻」ではない。
+// GitHub Pages版は30分に1回しか中身が変わらないが、ページ自体は常に応答するので
+// 15秒ごとの通信は成功し続ける。ここを「更新」と表示すると、warnIfStale() が出す
+// 「n分前のデータです」という警告と同時に「たった今更新」が出て矛盾して見える。
+// 「確認」という言葉にして、通信の生死とデータの新しさを別物として示す。
+function tickAge() {
+  const el = document.getElementById("age");
+  if (!lastFetch) { el.textContent = ""; return; }
+  const sec = Math.round((Date.now() - lastFetch) / 1000);
+  el.textContent = document.hidden
+    ? "更新停止中（タブ非表示）"
+    : (sec < 5 ? "たった今確認" : `${sec}秒前に確認`);
+  tickNext();
+  warnIfStale();
+}
+
+// トレーダー側が次に売買判断をする時刻までのカウントダウン。
+// 画面が15秒ごとに更新されても中身は5分に1度しか変わらないので、
+// 「動いていないのでは」と不安にならないように残り時間を出す。
+function tickNext() {
+  const el = document.getElementById("next");
+  if (!LAST || !LAST.running || !LAST.interval) { el.textContent = ""; return; }
+  // 常駐なら心拍から、定期実行なら最後に書かれた時刻から次回を数える
+  const base = LAST.mode === "scheduled"
+    ? (LAST.snapshot && LAST.snapshot.ts)
+    : LAST.heartbeat;
+  if (!base) { el.textContent = ""; return; }
+  const sec = Math.round((parseTs(base) + LAST.interval * 1000 - Date.now()) / 1000);
+  if (sec <= 0) {
+    el.textContent = LAST.mode === "scheduled" ? "次の実行を待っています…" : "売買判断を実行中…";
+    return;
+  }
+  const mm = Math.floor(sec / 60), ss = sec % 60;
+  el.textContent = (LAST.mode === "scheduled" ? "次の実行まで " : "次の売買判断まで ")
+    + (mm >= 60 ? `${Math.floor(mm / 60)}時間${mm % 60}分` : `${mm}:${String(ss).padStart(2, "0")}`);
+}
+
+// タブを切り替えなくても状況が分かるよう、タイトルと favicon に反映する。
+function setTabIdentity(s) {
+  const k = s.snapshot;
+  if (k) {
+    document.title = `${Math.round(k.equity).toLocaleString("ja-JP")}円 `
+      + `${k.pnl_pct >= 0 ? "+" : ""}${k.pnl_pct.toFixed(2)}% ｜ FX仮想運用`;
+  }
+  const color = s.running ? "#0ca30c" : "#d03b3b";
+  const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">`
+    + `<circle cx="16" cy="16" r="13" fill="${color}"/></svg>`;
+  let link = document.querySelector('link[rel="icon"]');
+  if (!link) { link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
+  link.href = "data:image/svg+xml," + encodeURIComponent(svgIcon);
+}
+
+function start() {
+  if (timer === null) timer = setInterval(refresh, REFRESH_MS);
+}
+function stop() {
+  if (timer !== null) { clearInterval(timer); timer = null; }
+}
+
+// タブが裏に回っている間は問い合わせを止め、戻ってきたら即座に最新化する。
+// 裏で15秒ごとに叩き続けても誰も見ていない。
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { stop(); tickAge(); }
+  else { refresh(); start(); }
+});
+
+document.getElementById("now").addEventListener("click", refresh);
+
+refresh();
+start();
+setInterval(tickAge, 1000);
+addEventListener("resize", () => {
+  // ホバー中（ツールチップ表示中）にリサイズされると、tip.style.left は
+  // リサイズ前の座標のまま残る。drawChart はグラフ自体は再描画するが
+  // tip の位置までは触らないため、ページ幅を超えて横スクロールが出ることがある
+  // （スマホの画面回転、デスクトップでのウィンドウドラッグ中にマウスがグラフ上にある場合）。
+  hideTip();
+  if (LAST) drawChart(LAST.curve, LAST.snapshot ? LAST.snapshot.capital : 1000000);
+});
+</script>
+</body>
+</html>
