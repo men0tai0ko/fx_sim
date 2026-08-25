@@ -234,6 +234,37 @@ def _():
     assert regime_mod.classify(closes)["レジーム"] == "強気"
 
 
+@test("HIGH_VOLを書き換えたらclassify()に反映される（既定引数に固定化されない）")
+def _():
+    """
+    classify(closes, *, high_vol=None) がNoneをデフォルト引数（= HIGH_VOL）
+    として束縛してしまうと、import時点の値がその場で固定され、
+    sensitivity.py が regime_mod.HIGH_VOL を書き換えて再検査しても
+    classify() 側には反映されないまま——感度分析がどの値を試しても
+    常に同じ結果を返し続けるという壊れ方を crypto_sim で実際に踏んだ。
+    ここではNoneを渡した（＝省略した）ときに呼び出し時点の最新値を
+    毎回読みに行くことを確認する。
+    """
+    import math
+    n = 260
+    vals = [100 * (1.0005 ** i) * (1 + 0.01 * math.sin(i / 3)) for i in range(n)]
+    vals += [vals[-1] * 1.01, vals[-1] * 1.02, vals[-1] * 1.03]  # 末尾を確実な上昇で締める
+    closes = pd.DataFrame({"USDJPY=X": vals})
+    closes.index = pd.date_range("2020-01-01", periods=len(vals), freq="D")
+
+    saved = regime_mod.HIGH_VOL
+    try:
+        reg = regime_mod.classify(closes)
+        assert reg["レジーム"] == "強気", f"前提が崩れている（強気になっていない）: {reg}"
+
+        regime_mod.HIGH_VOL = 0.01     # 実測ボラ（約6.1%）より確実に低い閾値
+        reg2 = regime_mod.classify(closes)
+        assert reg2["レジーム"] == "中立", \
+            f"HIGH_VOLの書き換えがclassify()に反映されていない: {reg2}"
+    finally:
+        regime_mod.HIGH_VOL = saved
+
+
 # ============================================================
 # データ層（FX固有: 土日休場の扱い）
 # ============================================================
