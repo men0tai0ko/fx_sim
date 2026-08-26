@@ -1,0 +1,84 @@
+name: 仮想運用
+
+# crypto_sim の trade.yml と機構は同一。違うのは実行タイミングだけ：
+# FXは土日休場なので、平日(UTC基準 月〜金)だけ動かす。日曜22時頃(UTC)の
+# 週明けオープンから月曜0時までの数時間だけ取りこぼす計算になるが、
+# 新規の建て玉判断はもともと1日1回なので実害は小さい
+# （crypto_simのREADME「新規の建て玉判断はもともと1日1回」と同じ理由）。
+#
+# GitHubのcronは高負荷時に遅れたり実行が飛ぶことがある（公式に明記されている）。
+# 1時間おき1本だと1回飛ぶだけで2時間の空白になるため、30分間隔にして
+# 空白の被害を最大1時間に抑えている（crypto_simと同じ対策）。
+on:
+  schedule:
+    - cron: "17,47 * * 1-5 *"   # 平日(UTC) 毎時17分・47分
+  workflow_dispatch:            # 手動実行も可能
+
+permissions:
+  contents: write              # 状態をdataブランチへ書き戻すため
+
+env:
+  TZ: Asia/Tokyo
+  RUN_INTERVAL_SEC: "1800"
+
+# 同時に2つ走ると同じ状態を奪い合うので直列化する
+concurrency:
+  group: live-trade
+  cancel-in-progress: false
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: コードを取得
+        uses: actions/checkout@v5
+
+      - name: 前回の状態を取得（初回は存在しない）
+        uses: actions/checkout@v5
+        continue-on-error: true
+        with:
+          ref: data
+          path: .prev
+
+      - name: 状態を復元
+        run: |
+          for d in state results; do
+            if [ -d ".prev/$d" ]; then
+              mkdir -p "$d" && cp -r ".prev/$d/." "$d/"
+              echo "復元: $d"
+            fi
+          done
+          rm -rf .prev
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 自動テスト
+        run: python test_all.py
+
+      - name: 1回ぶんの売買判断
+        run: python live_trade.py --ci
+
+      - name: 静的ダッシュボードを生成
+        run: python publish_static.py publish
+
+      - name: 状態を data ブランチへ保存
+        run: |
+          cd publish
+          git init -q -b data
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "運用状態 $(date -u '+%Y-%m-%d %H:%MZ')"
+          # 毎回1コミットだけの新しい履歴を強制的に置き換える。
+          # 追記していくと年に何千コミットも積み上がるため。
+          git push -q --force \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" data
+
+      - name: 結果を表示
+        run: python live_trade.py --status
