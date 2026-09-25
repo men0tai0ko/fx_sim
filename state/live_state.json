@@ -1,0 +1,18 @@
+{
+  "broker": {
+    "cash": 987236.4173337664,
+    "positions": {}
+  },
+  "peaks": {},
+  "targets": {},
+  "stopped": [
+    "AUDJPY=X",
+    "EURJPY=X",
+    "GBPJPY=X"
+  ],
+  "cooldown": {},
+  "last_plan_date": "2026-09-25",
+  "started": "2026-08-25 23:03:30",
+  "peak_equity": 1002297.3836244217,
+  "updated": "2026-09-26 08:46:04"
+}
