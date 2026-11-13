@@ -1,0 +1,32 @@
+{
+  "broker": {
+    "cash": 394894.5669335066,
+    "positions": {
+      "USDJPY=X": {
+        "qty": 1865.5980217174201,
+        "cost_jpy": 296170.9252001299
+      },
+      "GBPJPY=X": {
+        "qty": 1397.6445298466215,
+        "cost_jpy": 296170.9252001299
+      }
+    }
+  },
+  "peaks": {
+    "USDJPY=X": 160.177001953125,
+    "GBPJPY=X": 212.33599853515625
+  },
+  "targets": {
+    "USDJPY=X": 0.3,
+    "GBPJPY=X": 0.3
+  },
+  "stopped": [
+    "AUDJPY=X",
+    "EURJPY=X"
+  ],
+  "cooldown": {},
+  "last_plan_date": "2026-11-13",
+  "started": "2026-08-25 23:03:30",
+  "peak_equity": 1002297.3836244217,
+  "updated": "2026-11-14 08:46:11"
+}
